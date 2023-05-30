@@ -379,13 +379,17 @@
 
         </style>
     </head>
+	<script>
+var baseHost = document.location.origin
+var streamUrl = baseHost + ':81'
+	</script>
     <body>
         <section class="main">
-            <div id="logo">
+            <div id="logo" class="hidden">
                 <label for="nav-toggle-cb" id="nav-toggle">&#9776;&nbsp;&nbsp;Toggle OV2640 settings</label>
             </div>
             <div id="content">
-                <div id="sidebar">
+                <div id="sidebar" class="hidden">
                     <input type="checkbox" id="nav-toggle-cb" checked="checked">
                     <nav id="menu">
 
@@ -701,19 +705,20 @@
                     </nav>
                 </div>
                 <figure>
-                    <div id="stream-container" class="image-container hidden">
+                    <div id="stream-container" class="image-container">
                         <a id="save-still" href="#" class="button save" download="capture.jpg">Save</a>
                         <div class="close" id="close-stream">×</div>
                         <img id="stream" src="" crossorigin>
+						<script>
+const stream_view = document.getElementById('stream')
+stream_view.src = `${streamUrl}/cmd_stream`
+						</script>
                     </div>
                 </figure>
             </div>
         </section>
         <script>
 document.addEventListener('DOMContentLoaded', function (event) {
-  var baseHost = document.location.origin
-  var streamUrl = baseHost + ':81'
-
   function fetchUrl(url, cb){
     fetch(url)
       .then(function (response) {
