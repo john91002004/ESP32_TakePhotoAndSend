@@ -3,16 +3,22 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
+#include <esp_bt.h>
+#include <esp_bt_main.h>
+#include <esp_err.h> 
 
 // ===========================
 // Ble variables
 // ===========================
 BLEServer* pServer = NULL;
 BLECharacteristic* p1 = NULL, *p2 = NULL, *p3 = NULL;
+BLEService *pService = NULL;
 int deviceConnected = 0;
 bool oldDeviceConnected = false;
 uint32_t value = 0;
 char* s[] = {"This is p1: ", "This is p2: ", "URLGREAT", "ROCF", "ISO27001 is good!"} ; 
+
+extern int ble_state; 
 
 #define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define C1_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
@@ -36,17 +42,80 @@ class MyServerCallbacks: public BLEServerCallbacks {
     }
 };
 
-void BleServer_init() {
+void stop_ble_deinit_disable() {
+  BLEDevice::stopAdvertising(); 
+  esp_bluedroid_disable();
+  esp_bluedroid_deinit();
+  esp_bt_controller_disable();
+  esp_bt_controller_deinit();
+  ble_state = 0; 
+}
+
+void restart_ble_init_enable() {
+  esp_err_t errRc = ESP_OK; 
+  if (!btStart()) {
+    Serial.println("[ERROR] Fail to btStart()."); 
+    return ;
+  }
+  
+  errRc = esp_bluedroid_init();
+  if (errRc != ESP_OK) {
+    Serial.println("[ERROR] Fail to esp_bluedroid_init()."); 
+    return ;
+  }
+  errRc = esp_bluedroid_enable(); 
+  if (errRc != ESP_OK) {
+    Serial.println("[ERROR] Fail to esp_bluedroid_enable()."); 
+    return ; 
+  }
+  
+  BLEDevice::startAdvertising(); 
+  ble_state = 1; 
+}
+
+void stop_ble() {
+  BLEDevice::stopAdvertising(); 
+  BLEDevice::deinit(false); 
+  ble_state = 0; 
+}
+
+void restart_ble() {
+  BLEDevice::init("ESP32_notify_server"); 
+  BLEDevice::startAdvertising(); 
+  ble_state = 1; 
+}
+
+void start_ad() {
+  BLEDevice::startAdvertising();
+}
+
+void stop_ad() {
+  BLEDevice::stopAdvertising();
+}
+
+void clearall_ble() {
+  BLEDevice::stopAdvertising(); 
+  BLEDevice::deinit(true); 
+  ble_state = 0;  
+}
+
+void start_ble() {
+  ble_state = 1; 
 
   // Create the BLE Server
+  // BLEDevice::init() does: btStart(), esp_bt_controller_init(), esp_bt_controller_enable(), esp_bluedroid_init(), esp_bluedroid_enable(), 
+  // esp_ble_gap_register_callback(), esp_ble_gattc_register_callback(), esp_ble_gatts_register_callback(), esp_ble_gap_set_device_name() 
+  BLEDevice::init("ESP32_notify_server");   
+
+  // BLEDevice::m_pServer is singleton
+  // createServer() does: BLEDevice::m_pServer = new BLEServer(), ->createApp() 
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
-  Serial.println("[FLAG] BleServer_init 3"); 
   // Create the BLE Service
-  BLEService *pService = pServer->createService(SERVICE_UUID);
+  // and bind this service to the server when do BLEService::executeCreate()
+  pService = pServer->createService(SERVICE_UUID);
 
-  Serial.println("[FLAG] BleServer_init 4"); 
   // Create a BLE Characteristic
   p1 = pService->createCharacteristic(
                       C1_UUID,
@@ -72,18 +141,16 @@ void BleServer_init() {
                       BLECharacteristic::PROPERTY_INDICATE
                     );
 
-  Serial.println("[FLAG] BleServer_init 5"); 
   // Create a BLE Descriptor
   p1->addDescriptor(new BLE2902());
   p2->addDescriptor(new BLE2902());
   p3->addDescriptor(new BLE2902());
 
-  Serial.println("[FLAG] BleServer_init 6"); 
   // Start the service
   pService->start();
 
-  Serial.println("[FLAG] BleServer_init 7"); 
   // Start advertising
+  // new a BLEAdvertising object if none (singleton)
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
   pAdvertising->setScanResponse(false);
@@ -130,6 +197,8 @@ void receiveAndNotify() {
     p3->notify();
     Serial.print("p3 notify ");
     Serial.println(value); 
+
+    delay(5000); 
   }
 
   // disconnecting
