@@ -3,7 +3,6 @@
 #include <string.h> 
 #include <HTTPClient.h>
 #include <SPIFFS.h>
-#include <BLEDevice.h>
 //
 // WARNING!!! PSRAM IC required for UXGA resolution and high JPEG quality
 //            Ensure ESP32 Wrover Module or other board with PSRAM is selected
@@ -27,13 +26,26 @@ const char* password = "ContinuousNormalThink";
 
 #define FILE_PHOTO "/photo.jpg"
 
-int ble_state = 0, wifi_state = 0; 
+extern int ble_state; 
+extern int wifi_state; 
+extern int wifi_ble_switch_cmd_enable;
 
 void startCameraServer();
 void init_camera(); 
 void initSPIFFS(); 
 void BleServer_init();
 void receiveAndNotify(); 
+void init_wifi_sta(); 
+void stop_wifi(); 
+void start_ble(); 
+void restart_ble(); 
+void debug_ble_start(); 
+void stop_ble(); 
+void start_ad(); 
+void stop_ad(); 
+void restart_ble_init_enable(); 
+void stop_ble_deinit_disable(); 
+void clearall_ble(); 
 
 void setup() {
   Serial.begin(115200);
@@ -41,18 +53,13 @@ void setup() {
   Serial.println();
 
   // Ble Server init
-  Serial.println("[FLAG] BleServer_init 1"); 
-  // Create the BLE Device
-  BLEDevice::init("ESP32_notify_server");
-  Serial.println("[FLAG] BleServer_init 2"); 
-  ble_state = 1; 
-  BleServer_init(); 
+  start_ble(); 
 
   // init spiff 
   initSPIFFS(); 
 
   // init Wifi 
-  init_wifi(); 
+  init_wifi_sta(); 
 
   // init camera 
   init_camera(); 
@@ -63,41 +70,88 @@ void setup() {
   Serial.print(WiFi.localIP());
   Serial.println("' to connect");
 
+  wifi_ble_switch_cmd_enable = 1; 
+
+#ifdef ARDUINO_ARCH_ESP32
+  Serial.println("ARDUINO_ARCH_ESP32"); 
+#else 
+  Serial.println("NO ARDUINO_ARCH_ESP32"); 
+#endif 
+
+#ifdef CLASSIC_BT_ENABLED
+  Serial.println("CLASSIC_BT_ENABLED"); 
+#else 
+  Serial.println("NO CLASSIC_BT_ENABLED"); 
+#endif 
+
 }
 
 void loop() {
-  // Do nothing. Everything is done in another task by the web server
-  if (Serial.available()) {
+  // only wifi_ble_switch_cmd is enabled, the command will be valid. Otherwise, the command will be received in app_httpd.cpp to control taking pictures
+  if (wifi_ble_switch_cmd_enable == 1 && Serial.available()) {
     String s = Serial.readStringUntil('\n');
+
     if (s == "wifi stop" && wifi_state == 1) {
-      Serial.println("Wifi stop cmd received."); 
-      if (WiFi.mode(WIFI_OFF)) {
-        Serial.println("Wifi stop succeeded."); 
-        wifi_state = 0; 
-      } 
-      else {
-        Serial.println("Wifi stop failed."); 
-      }
+      Serial.println("[INFO] Wifi stop cmd received."); 
+      stop_wifi(); 
     }
     else if (s == "wifi start" && wifi_state == 0) {
-      Serial.println("Wifi start cmd received."); 
-      WiFi.begin(ssid, password); 
-      wifi_state = 1;
+      Serial.println("[INFO] Wifi start cmd received."); 
+      init_wifi_sta(); 
     }
+
     else if (s == "ble stop" && ble_state == 1) {
-      Serial.println("BLE stop cmd received."); 
-      BLEDevice::deinit();  // didn't release memory
-      ble_state = 0; 
+      Serial.println("[INFO] BLE stop cmd received."); 
+      stop_ble(); 
     }
     else if (s == "ble start" && ble_state == 0) {
-      Serial.println("BLE start cmd received."); 
-      BLEDevice::init("ESP32_notify_server");
-      ble_state = 1; 
+      Serial.println("[INFO] BLE start cmd received."); 
+      //start_ble(); 
+      restart_ble(); 
     }
+
+    else if (s == "status") {
+      Serial.printf("[INFO] status - wifi: %d, ble: %d\n", wifi_state, ble_state);
+    }
+
+    else if (s == "stop ad" && ble_state == 1) {
+      Serial.println("[INFO] AD stop cmd received."); 
+      stop_ad(); 
+    }
+    else if (s == "start ad" && ble_state == 1) {
+      Serial.println("[INFO] AD start cmd received."); 
+      start_ad(); 
+    }
+
+    else if (s == "ble init" && ble_state == 0) {
+      Serial.println("[INFO] BLE init cmd received."); 
+      restart_ble_init_enable(); 
+    }
+    else if (s == "ble deinit" && ble_state == 1) {
+      Serial.println("[INFO] BLE deinit cmd received."); 
+      stop_ble_deinit_disable(); 
+    }
+
+    else if (s == "ble startover" && ble_state == 0) {
+      Serial.println("[INFO] BLE startover cmd received."); 
+      start_ble(); 
+    }
+    else if (s == "ble clearall" && ble_state == 1) {
+      Serial.println("[INFO] BLE clearall cmd received."); 
+      clearall_ble(); 
+    }
+
+    else {
+      Serial.print("[INFO] Invalid cmd: "); 
+      Serial.println(s);  
+    }
+
+    Serial.print("[DEBUG] Free heap memory: ");
+    Serial.println(ESP.getFreeHeap());
   }
+
   if (ble_state == 1) {
     receiveAndNotify(); 
-    delay(5000); 
   }
 }
 
@@ -112,12 +166,9 @@ void initSPIFFS() {
   }
 }
 
-void init_wifi() {
-  Serial.println("[FLAG] init_wifi flag 1"); 
+void init_wifi_sta() {
   WiFi.begin(ssid, password);
-  Serial.println("[FLAG] init_wifi flag 2");
   WiFi.setSleep(true);
-  Serial.println("[FLAG] init_wifi flag 3");
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
@@ -127,4 +178,15 @@ void init_wifi() {
   Serial.println("WiFi connected");
   wifi_state = 1; 
 }
+
+void stop_wifi() {
+  if (WiFi.mode(WIFI_OFF)) {
+    Serial.println("[INFO] Wifi stop succeeded."); 
+    wifi_state = 0; 
+  } 
+  else {
+    Serial.println("Wifi stop failed."); 
+  }
+}
+
 

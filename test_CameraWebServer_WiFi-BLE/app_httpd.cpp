@@ -28,6 +28,7 @@
 #include "sdkconfig.h"
 #include "camera_index.h"
 #include <SPIFFS.h>
+#include "app_httpd.h"
 
 /*-----*/
 #define FILE_PHOTO "/photo.jpg"
@@ -150,6 +151,9 @@ static int ra_filter_run(ra_filter_t *filter, int value)
 static esp_err_t cmd_stream_handler(httpd_req_t *req)
 {
     log_i("[INFO] cmd_stream_handler start flag!"); 
+    // disable the cmd receiving by loop()
+    wifi_ble_switch_cmd_enable = 0; 
+    
     camera_fb_t *fb = NULL;
     struct timeval _timestamp;
     esp_err_t res = ESP_OK;
@@ -181,8 +185,10 @@ static esp_err_t cmd_stream_handler(httpd_req_t *req)
 
       // state machine 
       if (state == EXIT_STATE) {
-        Serial.println("Sorry, you can not exit.");
-        state = STOP_STATE; 
+        Serial.println("[INFO] End camera and exit from cmd_stream_handler.");
+        wifi_ble_switch_cmd_enable = 1; 
+        res = ESP_OK; 
+        break; 
       }
       if (state == STOP_STATE) { // state: stop
         continue; 
